@@ -96,3 +96,4 @@ com.biosphere.entities     Organism, Movable, Plant, Animal, Herbivore, Carnivor
 com.biosphere.ui           Console rendering, SimulationLauncher (main entry point)
 com.biosphere.persistence  MySQL DAO layer, PersistenceEvent, connection pool config (planned)
 ```
+"# biosphere-21" 
