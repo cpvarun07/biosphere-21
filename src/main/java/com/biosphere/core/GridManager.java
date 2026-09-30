@@ -247,9 +247,10 @@ public final class GridManager {
                 if (dx == 0 && dy == 0) {
                     continue;
                 }
-                Point candidate = new Point(center.x() + dx, center.y() + dy);
-                if (inBounds(candidate)) {
-                    neighbors.add(candidate);
+                int x = center.x() + dx;
+                int y = center.y() + dy;
+                if (x >= 0 && x < width && y >= 0 && y < height) {
+                    neighbors.add(new Point(x, y));
                 }
             }
         }

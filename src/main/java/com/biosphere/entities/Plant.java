@@ -7,42 +7,41 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * A sessile primary producer. Plants never move — they gain energy
- * passively each tick (simulating photosynthesis) and, once energy is
- * high enough, attempt to spread a new Plant instance into a random
- * empty neighboring cell. This is the simulation's only energy source:
- * Herbivores gain energy exclusively by consuming Plants.
- *
- * Deliberately does NOT implement Movable — a Plant's "action" each tick
- * is grow-then-maybe-spread, never relocation. Keeping Plant outside the
- * Movable contract means the compiler itself prevents Plant from ever
- * being passed to movement-only logic, rather than relying on an
- * instanceof check somewhere deep in the simulation loop.
+ * Producer lifecycle:
+ * P = young plant. Herbivores may eat P.
+ * T = mature tree. No organism can eat T.
  */
 public class Plant extends Organism {
-
     private static final int MAX_ENERGY = 100;
     private static final int STARTING_ENERGY = 20;
     private static final int GROWTH_PER_TICK = 5;
-    private static final int REPRODUCTION_THRESHOLD = 80;
-    private static final int REPRODUCTION_COST = 40;
+    private static final int TREE_THRESHOLD = 60;
+    private static final int REPRODUCTION_THRESHOLD = 45;
+    private static final int REPRODUCTION_COST = 25;
     private static final long TICK_INTERVAL_MS = 1000L;
 
-    public Plant(Point startPosition, GridManager gridManager, OffspringListener offspringListener) {
-        super(startPosition, STARTING_ENERGY, MAX_ENERGY, gridManager, offspringListener);
+    private volatile boolean tree;
+    private int ageTicks;
+    private static final int TREE_MATURATION_TICKS = 20;
+
+    public Plant(Point startPosition, GridManager gridManager, OffspringListener listener) {
+        super(startPosition, STARTING_ENERGY, MAX_ENERGY, gridManager, listener);
     }
 
-    /**
-     * Per-tick lifecycle: photosynthesize (gain energy), then attempt to
-     * spread into a neighboring cell if energy allows it. Runs on this
-     * Plant's dedicated virtual thread until die() is called.
-     */
     @Override
     public void act() throws InterruptedException {
         while (isAlive()) {
-            photosynthesize();
+            adjustEnergy(GROWTH_PER_TICK);
+            ageTicks++;
 
-            if (getEnergy() >= REPRODUCTION_THRESHOLD) {
+            // A young P becomes a mature T after several growth cycles.
+            // This is age-based so reproduction cannot keep resetting the plant
+            // before it reaches the tree stage.
+            if (!tree && (ageTicks >= TREE_MATURATION_TICKS || getEnergy() >= TREE_THRESHOLD)) {
+                tree = true;
+            }
+
+            if (!tree && getEnergy() >= REPRODUCTION_THRESHOLD) {
                 trySpread();
             }
 
@@ -50,51 +49,28 @@ public class Plant extends Organism {
         }
     }
 
-    /**
-     * Gains a fixed amount of energy each tick, representing continuous
-     * photosynthesis. Uses the protected adjustEnergy() from Organism,
-     * which is synchronized to guard against concurrent energy mutation.
-     */
-    private void photosynthesize() {
-        adjustEnergy(GROWTH_PER_TICK);
-    }
+    public boolean isTree() { return tree; }
+    public boolean isEdible() { return isAlive() && !tree; }
 
-    /**
-     * Attempts to place a new Plant instance in a random empty
-     * neighboring cell, at the cost of REPRODUCTION_COST energy taken
-     * from this plant. If no empty neighbor exists, or the chosen cell
-     * gets claimed by a competing thread first, the energy cost is still
-     * paid — reproduction attempts are not free just because they fail.
-     */
     private void trySpread() {
         GridManager grid = getGrid();
-        List<Point> neighbors = grid.neighborsOf(getPosition());
-        List<Point> emptyNeighbors = neighbors.stream()
+        List<Point> empty = grid.neighborsOf(getPosition()).stream()
             .filter(p -> grid.peek(p) == null)
             .toList();
+        if (empty.isEmpty()) return;
 
-        if (emptyNeighbors.isEmpty()) {
-            return;
-        }
-
-        Point target = emptyNeighbors.get(
-            ThreadLocalRandom.current().nextInt(emptyNeighbors.size())
-        );
-
-        adjustEnergy(-REPRODUCTION_COST);
-
+        Point target = empty.get(ThreadLocalRandom.current().nextInt(empty.size()));
         Plant offspring = (Plant) clone();
+        offspring.tree = false;
+        offspring.ageTicks = 0;
         offspring.setEnergyDirect(STARTING_ENERGY);
+
         if (grid.tryOccupy(target, offspring)) {
+            adjustEnergy(-REPRODUCTION_COST);
             getOffspringListener().onOffspringCreated(offspring);
         }
-        // SimulationEngine (the standard OffspringListener implementation)
-        // is responsible for tracking the offspring and submitting its
-        // act() loop to the virtual thread executor from here on.
     }
 
     @Override
-    public char glyph() {
-        return '*';
-    }
+    public char glyph() { return tree ? 'T' : 'P'; }
 }
